@@ -1,0 +1,439 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  COUPLE
+  PLANNER
+  VENDOR
+  ADMIN
+}
+
+enum VendorCategory {
+  VENUE
+  PHOTOGRAPHER
+  VIDEOGRAPHER
+  CATERER
+  FLORIST
+  MUSIC_DJ
+  MUSIC_BAND
+  BAKER
+  DECORATOR
+  MAKEUP_ARTIST
+  HAIR_STYLIST
+  TRANSPORTATION
+  INVITATIONS
+  WEDDING_PLANNER
+  OTHER
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+enum RSVPStatus {
+  PENDING
+  ATTENDING
+  NOT_ATTENDING
+  MAYBE
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ExpenseStatus {
+  PLANNED
+  PAID
+  PENDING
+  OVERDUE
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password      String
+  firstName     String
+  lastName      String
+  phone         String?
+  role          UserRole  @default(COUPLE)
+  avatar        String?
+  isVerified    Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relationships
+  events        Event[]
+  vendorProfile VendorProfile?
+  plannerProfile PlannerProfile?
+  coupleProfile CoupleProfile?
+  tasks         Task[]
+  comments      Comment[]
+  notifications Notification[]
+  sentMessages  Message[] @relation("SentMessages")
+  receivedMessages Message[] @relation("ReceivedMessages")
+
+  @@index([email])
+}
+
+model CoupleProfile {
+  id              String    @id @default(uuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  partnerName     String?
+  weddingDate     DateTime?
+  budget          Float?
+  guestCount      Int?
+  location        String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model PlannerProfile {
+  id              String    @id @default(uuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company         String?
+  bio             String?
+  yearsExperience Int?
+  portfolio       String[]
+  certifications  String[]
+  rating          Float     @default(0)
+  reviewCount     Int       @default(0)
+  priceRange      String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relationships
+  managedEvents   Event[]
+}
+
+model VendorProfile {
+  id              String          @id @default(uuid())
+  userId          String          @unique
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  businessName    String
+  category        VendorCategory
+  description     String?
+  serviceArea     String[]
+  portfolio       String[]
+  priceRange      String?
+  rating          Float           @default(0)
+  reviewCount     Int             @default(0)
+  website         String?
+  instagram       String?
+  facebook        String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // Relationships
+  bookings        Booking[]
+  reviews         Review[]
+}
+
+model Event {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plannerId       String?
+  planner         PlannerProfile? @relation(fields: [plannerId], references: [id])
+
+  name            String
+  type            String    @default("Wedding")
+  date            DateTime
+  time            String?
+  venue           String?
+  venueAddress    String?
+  budget          Float?
+  guestCount      Int?
+  description     String?
+
+  // Wedding Website Settings
+  websiteSlug     String?   @unique
+  websiteTheme    String    @default("classic")
+  websiteEnabled  Boolean   @default(false)
+  coupleStory     String?
+  couplePhoto     String?
+  partner1Name    String?
+  partner2Name    String?
+
+  isPublic        Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relationships
+  guests          Guest[]
+  tasks           Task[]
+  expenses        Expense[]
+  bookings        Booking[]
+  timeline        TimelineItem[]
+  checklist       ChecklistItem[]
+  photos          Photo[]
+  collaborators   EventCollaborator[]
+
+  @@index([userId])
+  @@index([websiteSlug])
+}
+
+model EventCollaborator {
+  id        String   @id @default(uuid())
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  email     String
+  role      String   @default("viewer") // viewer, editor, admin
+  invitedAt DateTime @default(now())
+  acceptedAt DateTime?
+
+  @@unique([eventId, email])
+  @@index([eventId])
+}
+
+model Guest {
+  id              String      @id @default(uuid())
+  eventId         String
+  event           Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  firstName       String
+  lastName        String
+  email           String?
+  phone           String?
+  category        String?     // Family, Friends, Colleagues, etc.
+  plusOne         Boolean     @default(false)
+  plusOneName     String?
+  rsvpStatus      RSVPStatus  @default(PENDING)
+  rsvpDate        DateTime?
+  dietaryRestrictions String?
+  tableNumber     Int?
+  notes           String?
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([eventId])
+  @@index([email])
+}
+
+model Task {
+  id              String        @id @default(uuid())
+  eventId         String
+  event           Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  assignedToId    String?
+  assignedTo      User?         @relation(fields: [assignedToId], references: [id])
+
+  title           String
+  description     String?
+  dueDate         DateTime?
+  priority        TaskPriority  @default(MEDIUM)
+  status          TaskStatus    @default(TODO)
+  category        String?
+  order           Int           @default(0)
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  completedAt     DateTime?
+
+  @@index([eventId])
+  @@index([assignedToId])
+}
+
+model ChecklistItem {
+  id              String    @id @default(uuid())
+  eventId         String
+  event           Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  title           String
+  category        String?   // "12+ months", "9-11 months", "6-8 months", etc.
+  isCompleted     Boolean   @default(false)
+  order           Int       @default(0)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([eventId])
+}
+
+model TimelineItem {
+  id              String    @id @default(uuid())
+  eventId         String
+  event           Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  title           String
+  description     String?
+  time            String
+  duration        Int?      // in minutes
+  order           Int       @default(0)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([eventId])
+}
+
+model Expense {
+  id              String        @id @default(uuid())
+  eventId         String
+  event           Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  name            String
+  category        String
+  estimatedCost   Float
+  actualCost      Float?
+  paidAmount      Float         @default(0)
+  status          ExpenseStatus @default(PLANNED)
+  dueDate         DateTime?
+  paidDate        DateTime?
+  vendor          String?
+  notes           String?
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([eventId])
+}
+
+model Booking {
+  id              String        @id @default(uuid())
+  eventId         String
+  event           Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  vendorId        String
+  vendor          VendorProfile @relation(fields: [vendorId], references: [id])
+
+  status          BookingStatus @default(PENDING)
+  serviceDate     DateTime
+  serviceDetails  String?
+  agreedPrice     Float?
+  depositPaid     Float?
+  depositDueDate  DateTime?
+  finalPaymentDue DateTime?
+  notes           String?
+
+  contractId      String?
+  contract        Contract?     @relation(fields: [contractId], references: [id])
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([eventId])
+  @@index([vendorId])
+}
+
+model Contract {
+  id              String    @id @default(uuid())
+
+  title           String
+  description     String?
+  fileUrl         String
+  fileName        String
+  fileSize        Int
+  uploadedAt      DateTime  @default(now())
+  expiresAt       DateTime?
+
+  bookings        Booking[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model Review {
+  id              String        @id @default(uuid())
+  vendorId        String
+  vendor          VendorProfile @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  rating          Int           // 1-5
+  title           String?
+  comment         String?
+  reviewerName    String
+  eventDate       DateTime?
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([vendorId])
+}
+
+model Photo {
+  id              String    @id @default(uuid())
+  eventId         String
+  event           Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  url             String
+  caption         String?
+  category        String?   // ceremony, reception, portraits, etc.
+  order           Int       @default(0)
+  isPublic        Boolean   @default(false)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([eventId])
+}
+
+model Comment {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  content         String
+  entityType      String    // event, task, booking, etc.
+  entityId        String
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([entityType, entityId])
+}
+
+model Message {
+  id              String    @id @default(uuid())
+  senderId        String
+  sender          User      @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId      String
+  receiver        User      @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  subject         String?
+  content         String
+  isRead          Boolean   @default(false)
+
+  createdAt       DateTime  @default(now())
+
+  @@index([senderId])
+  @@index([receiverId])
+}
+
+model Notification {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type            String    // task_assigned, rsvp_received, payment_due, etc.
+  title           String
+  message         String
+  link            String?
+  isRead          Boolean   @default(false)
+
+  createdAt       DateTime  @default(now())
+
+  @@index([userId])
+}
