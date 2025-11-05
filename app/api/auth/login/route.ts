@@ -1,7 +1,6 @@
 import { NextRequest } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { verifyPassword, generateAccessToken, generateRefreshToken } from '@/lib/auth';
-import { successResponse, errorResponse, validationErrorResponse } from '@/lib/api-response';
+import { createClient } from '@/lib/supabase/server';
+import { successResponse, errorResponse, validationErrorResponse } from '@/lib/supabase/api-helpers';
 import { loginSchema } from '@/lib/validators';
 import { ZodError } from 'zod';
 
@@ -12,40 +11,37 @@ export async function POST(request: NextRequest) {
     // Validate input
     const validatedData = loginSchema.parse(body);
 
-    // Find user
-    const user = await prisma.user.findUnique({
-      where: { email: validatedData.email },
+    const supabase = createClient();
+
+    // Sign in with Supabase Auth
+    const { data: authData, error: signInError } = await supabase.auth.signInWithPassword({
+      email: validatedData.email,
+      password: validatedData.password,
     });
 
-    if (!user) {
+    if (signInError) {
       return errorResponse('Invalid email or password', 401);
     }
 
-    // Verify password
-    const isValidPassword = await verifyPassword(
-      validatedData.password,
-      user.password
-    );
-
-    if (!isValidPassword) {
+    if (!authData.user) {
       return errorResponse('Invalid email or password', 401);
     }
 
-    // Generate tokens
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
-
-    // Return user data without password
-    const { password, ...userWithoutPassword } = user;
+    // Get full user profile
+    const { data: userProfile } = await supabase
+      .from('users')
+      .select('id, email, first_name, last_name, phone, role, avatar, is_verified, created_at, updated_at')
+      .eq('id', authData.user.id)
+      .single();
 
     return successResponse({
-      user: userWithoutPassword,
-      accessToken,
-      refreshToken,
-    }, 'Login successful');
+      user: userProfile,
+      session: authData.session,
+    });
   } catch (error) {
     if (error instanceof ZodError) {
-      return validationErrorResponse(error.errors);
+      const message = error.errors?.[0]?.message || 'Invalid request data';
+      return validationErrorResponse(message);
     }
 
     console.error('Login error:', error);

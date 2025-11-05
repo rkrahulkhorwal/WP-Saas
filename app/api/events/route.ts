@@ -1,33 +1,51 @@
 import { NextRequest } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { successResponse, errorResponse, validationErrorResponse } from '@/lib/api-response';
-import { requireAuth } from '@/lib/middleware';
+import { createClient } from '@/lib/supabase/server';
+import { successResponse, errorResponse, requireAuth, validateRequest } from '@/lib/supabase/api-helpers';
 import { createEventSchema } from '@/lib/validators';
-import { ZodError } from 'zod';
 
 export async function GET(request: NextRequest) {
   try {
-    const authResult = await requireAuth(request);
+    const { user, error: authError } = await requireAuth();
 
-    if (!authResult.success) {
-      return authResult.response;
+    if (authError) {
+      return authError;
     }
 
-    const events = await prisma.event.findMany({
-      where: { userId: authResult.user.userId },
-      include: {
-        _count: {
-          select: {
-            guests: true,
-            tasks: true,
-            expenses: true,
-          },
-        },
-      },
-      orderBy: { date: 'asc' },
-    });
+    const supabase = createClient();
 
-    return successResponse(events);
+    // Get events for the user
+    const { data: events, error } = await supabase
+      .from('events')
+      .select('*')
+      .eq('user_id', user!.id)
+      .order('date', { ascending: true });
+
+    if (error) {
+      console.error('Get events error:', error);
+      return errorResponse('An error occurred while fetching events', 500);
+    }
+
+    // Get counts for each event
+    const eventsWithCounts = await Promise.all(
+      (events || []).map(async (event) => {
+        const [guestsCount, tasksCount, expensesCount] = await Promise.all([
+          supabase.from('guests').select('id', { count: 'exact', head: true }).eq('event_id', event.id),
+          supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('event_id', event.id),
+          supabase.from('expenses').select('id', { count: 'exact', head: true }).eq('event_id', event.id),
+        ]);
+
+        return {
+          ...event,
+          _count: {
+            guests: guestsCount.count || 0,
+            tasks: tasksCount.count || 0,
+            expenses: expensesCount.count || 0,
+          },
+        };
+      })
+    );
+
+    return successResponse(eventsWithCounts);
   } catch (error) {
     console.error('Get events error:', error);
     return errorResponse('An error occurred while fetching events', 500);
@@ -36,69 +54,84 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const authResult = await requireAuth(request);
+    const { user, error: authError } = await requireAuth();
 
-    if (!authResult.success) {
-      return authResult.response;
+    if (authError) {
+      return authError;
     }
 
     const body = await request.json();
-    const validatedData = createEventSchema.parse(body);
+    const { data: validatedData, error: validationError } = validateRequest(createEventSchema, body);
+
+    if (validationError) {
+      return validationError;
+    }
+
+    const supabase = createClient();
 
     // Generate a unique website slug if not provided
-    let websiteSlug = validatedData.name
+    let websiteSlug = validatedData!.name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '');
 
     // Ensure slug is unique
-    let slugExists = await prisma.event.findUnique({
-      where: { websiteSlug },
-    });
+    let { data: slugExists } = await supabase
+      .from('events')
+      .select('id')
+      .eq('website_slug', websiteSlug)
+      .maybeSingle();
 
     let counter = 1;
     const baseSlug = websiteSlug;
     while (slugExists) {
       websiteSlug = `${baseSlug}-${counter}`;
-      slugExists = await prisma.event.findUnique({
-        where: { websiteSlug },
-      });
+      const result = await supabase
+        .from('events')
+        .select('id')
+        .eq('website_slug', websiteSlug)
+        .maybeSingle();
+      slugExists = result.data;
       counter++;
     }
 
-    const event = await prisma.event.create({
-      data: {
-        userId: authResult.user.userId,
-        name: validatedData.name,
-        type: validatedData.type,
-        date: new Date(validatedData.date),
-        time: validatedData.time,
-        venue: validatedData.venue,
-        venueAddress: validatedData.venueAddress,
-        budget: validatedData.budget,
-        guestCount: validatedData.guestCount,
-        description: validatedData.description,
-        partner1Name: validatedData.partner1Name,
-        partner2Name: validatedData.partner2Name,
-        websiteSlug,
-      },
-      include: {
-        _count: {
-          select: {
-            guests: true,
-            tasks: true,
-            expenses: true,
-          },
-        },
-      },
-    });
+    const { data: event, error } = await supabase
+      .from('events')
+      .insert({
+        user_id: user!.id,
+        name: validatedData!.name,
+        type: validatedData!.type || 'Wedding',
+        date: validatedData!.date,
+        time: validatedData!.time,
+        venue: validatedData!.venue,
+        venue_address: validatedData!.venueAddress,
+        budget: validatedData!.budget,
+        guest_count: validatedData!.guestCount,
+        description: validatedData!.description,
+        partner1_name: validatedData!.partner1Name,
+        partner2_name: validatedData!.partner2Name,
+        website_slug: websiteSlug,
+      })
+      .select()
+      .single();
 
-    return successResponse(event, 'Event created successfully', 201);
-  } catch (error) {
-    if (error instanceof ZodError) {
-      return validationErrorResponse(error.errors);
+    if (error) {
+      console.error('Create event error:', error);
+      return errorResponse('An error occurred while creating the event', 500);
     }
 
+    return successResponse(
+      {
+        ...event,
+        _count: {
+          guests: 0,
+          tasks: 0,
+          expenses: 0,
+        },
+      },
+      201
+    );
+  } catch (error) {
     console.error('Create event error:', error);
     return errorResponse('An error occurred while creating the event', 500);
   }

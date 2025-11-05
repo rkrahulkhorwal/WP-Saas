@@ -1,57 +1,65 @@
 import { NextRequest } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { successResponse, errorResponse, notFoundResponse, validationErrorResponse, forbiddenResponse } from '@/lib/api-response';
-import { requireAuth } from '@/lib/middleware';
+import { createClient } from '@/lib/supabase/server';
+import { successResponse, errorResponse, notFoundResponse, forbiddenResponse, requireAuth, validateRequest, checkEventAccess } from '@/lib/supabase/api-helpers';
 import { updateEventSchema } from '@/lib/validators';
-import { ZodError } from 'zod';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const authResult = await requireAuth(request);
+    const { user, error: authError } = await requireAuth();
 
-    if (!authResult.success) {
-      return authResult.response;
+    if (authError) {
+      return authError;
     }
 
-    const event = await prisma.event.findUnique({
-      where: { id: params.id },
-      include: {
-        planner: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                email: true,
-              },
-            },
-          },
-        },
-        _count: {
-          select: {
-            guests: true,
-            tasks: true,
-            expenses: true,
-            bookings: true,
-          },
-        },
-      },
-    });
+    const supabase = createClient();
 
-    if (!event) {
+    const { data: event, error } = await supabase
+      .from('events')
+      .select(`
+        *,
+        planner:planner_profiles (
+          *,
+          user:users (
+            id,
+            first_name,
+            last_name,
+            email
+          )
+        )
+      `)
+      .eq('id', params.id)
+      .single();
+
+    if (error || !event) {
       return notFoundResponse('Event not found');
     }
 
     // Check if user has access to this event
-    if (event.userId !== authResult.user.userId) {
+    const hasAccess = await checkEventAccess(params.id, user!.id);
+    if (!hasAccess) {
       return forbiddenResponse('You do not have access to this event');
     }
 
-    return successResponse(event);
+    // Get counts
+    const [guestsCount, tasksCount, expensesCount, bookingsCount] = await Promise.all([
+      supabase.from('guests').select('id', { count: 'exact', head: true }).eq('event_id', params.id),
+      supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('event_id', params.id),
+      supabase.from('expenses').select('id', { count: 'exact', head: true }).eq('event_id', params.id),
+      supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('event_id', params.id),
+    ]);
+
+    return successResponse({
+      ...event,
+      _count: {
+        guests: guestsCount.count || 0,
+        tasks: tasksCount.count || 0,
+        expenses: expensesCount.count || 0,
+        bookings: bookingsCount.count || 0,
+      },
+    });
   } catch (error) {
     console.error('Get event error:', error);
     return errorResponse('An error occurred while fetching the event', 500);
@@ -63,52 +71,55 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    const authResult = await requireAuth(request);
+    const { user, error: authError } = await requireAuth();
 
-    if (!authResult.success) {
-      return authResult.response;
+    if (authError) {
+      return authError;
     }
 
-    const event = await prisma.event.findUnique({
-      where: { id: params.id },
-    });
+    const supabase = createClient();
 
-    if (!event) {
-      return notFoundResponse('Event not found');
-    }
-
-    if (event.userId !== authResult.user.userId) {
+    // Check if user has access
+    const hasAccess = await checkEventAccess(params.id, user!.id);
+    if (!hasAccess) {
       return forbiddenResponse('You do not have permission to update this event');
     }
 
     const body = await request.json();
-    const validatedData = updateEventSchema.parse(body);
+    const { data: validatedData, error: validationError } = validateRequest(updateEventSchema, body);
+
+    if (validationError) {
+      return validationError;
+    }
 
     const updateData: any = {};
 
-    if (validatedData.name !== undefined) updateData.name = validatedData.name;
-    if (validatedData.type !== undefined) updateData.type = validatedData.type;
-    if (validatedData.date !== undefined) updateData.date = new Date(validatedData.date);
-    if (validatedData.time !== undefined) updateData.time = validatedData.time;
-    if (validatedData.venue !== undefined) updateData.venue = validatedData.venue;
-    if (validatedData.venueAddress !== undefined) updateData.venueAddress = validatedData.venueAddress;
-    if (validatedData.budget !== undefined) updateData.budget = validatedData.budget;
-    if (validatedData.guestCount !== undefined) updateData.guestCount = validatedData.guestCount;
-    if (validatedData.description !== undefined) updateData.description = validatedData.description;
-    if (validatedData.partner1Name !== undefined) updateData.partner1Name = validatedData.partner1Name;
-    if (validatedData.partner2Name !== undefined) updateData.partner2Name = validatedData.partner2Name;
+    if (validatedData!.name !== undefined) updateData.name = validatedData!.name;
+    if (validatedData!.type !== undefined) updateData.type = validatedData!.type;
+    if (validatedData!.date !== undefined) updateData.date = validatedData!.date;
+    if (validatedData!.time !== undefined) updateData.time = validatedData!.time;
+    if (validatedData!.venue !== undefined) updateData.venue = validatedData!.venue;
+    if (validatedData!.venueAddress !== undefined) updateData.venue_address = validatedData!.venueAddress;
+    if (validatedData!.budget !== undefined) updateData.budget = validatedData!.budget;
+    if (validatedData!.guestCount !== undefined) updateData.guest_count = validatedData!.guestCount;
+    if (validatedData!.description !== undefined) updateData.description = validatedData!.description;
+    if (validatedData!.partner1Name !== undefined) updateData.partner1_name = validatedData!.partner1Name;
+    if (validatedData!.partner2Name !== undefined) updateData.partner2_name = validatedData!.partner2Name;
 
-    const updatedEvent = await prisma.event.update({
-      where: { id: params.id },
-      data: updateData,
-    });
+    const { data: updatedEvent, error } = await supabase
+      .from('events')
+      .update(updateData)
+      .eq('id', params.id)
+      .select()
+      .single();
 
-    return successResponse(updatedEvent, 'Event updated successfully');
-  } catch (error) {
-    if (error instanceof ZodError) {
-      return validationErrorResponse(error.errors);
+    if (error) {
+      console.error('Update event error:', error);
+      return errorResponse('An error occurred while updating the event', 500);
     }
 
+    return successResponse(updatedEvent);
+  } catch (error) {
     console.error('Update event error:', error);
     return errorResponse('An error occurred while updating the event', 500);
   }
@@ -119,29 +130,31 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const authResult = await requireAuth(request);
+    const { user, error: authError } = await requireAuth();
 
-    if (!authResult.success) {
-      return authResult.response;
+    if (authError) {
+      return authError;
     }
 
-    const event = await prisma.event.findUnique({
-      where: { id: params.id },
-    });
+    const supabase = createClient();
 
-    if (!event) {
-      return notFoundResponse('Event not found');
-    }
-
-    if (event.userId !== authResult.user.userId) {
+    // Check if user has access
+    const hasAccess = await checkEventAccess(params.id, user!.id);
+    if (!hasAccess) {
       return forbiddenResponse('You do not have permission to delete this event');
     }
 
-    await prisma.event.delete({
-      where: { id: params.id },
-    });
+    const { error } = await supabase
+      .from('events')
+      .delete()
+      .eq('id', params.id);
 
-    return successResponse(null, 'Event deleted successfully');
+    if (error) {
+      console.error('Delete event error:', error);
+      return errorResponse('An error occurred while deleting the event', 500);
+    }
+
+    return successResponse({ message: 'Event deleted successfully' });
   } catch (error) {
     console.error('Delete event error:', error);
     return errorResponse('An error occurred while deleting the event', 500);
