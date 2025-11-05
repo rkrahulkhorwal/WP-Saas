@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient } from './server'
+import { Database } from './types'
+
+type User = Database['public']['Tables']['users']['Row']
 
 // Standard API response helpers
 export function successResponse(data: any, status: number = 200) {
@@ -27,7 +30,7 @@ export function notFoundResponse(message: string = 'Not found') {
 }
 
 // Middleware to require authentication
-export async function requireAuth(requiredRole?: string | string[]) {
+export async function requireAuth(requiredRole?: string | string[]): Promise<{ user: User | null; error: NextResponse | null }> {
   const supabase = createClient()
 
   const { data: { user }, error } = await supabase.auth.getUser()
@@ -47,15 +50,18 @@ export async function requireAuth(requiredRole?: string | string[]) {
     return { user: null, error: unauthorizedResponse('User profile not found') }
   }
 
+  // Type assertion for the profile
+  const typedProfile = profile as User
+
   // Check role if required
   if (requiredRole) {
     const roles = Array.isArray(requiredRole) ? requiredRole : [requiredRole]
-    if (!roles.includes(profile.role)) {
+    if (!roles.includes(typedProfile.role)) {
       return { user: null, error: forbiddenResponse('Insufficient permissions') }
     }
   }
 
-  return { user: profile, error: null }
+  return { user: typedProfile, error: null }
 }
 
 // Helper to check event ownership or collaboration
@@ -69,7 +75,7 @@ export async function checkEventAccess(eventId: string, userId: string) {
     .eq('id', eventId)
     .single()
 
-  if (event && event.user_id === userId) {
+  if (event && (event as any).user_id === userId) {
     return true
   }
 
@@ -94,7 +100,7 @@ export async function checkEventAccess(eventId: string, userId: string) {
         .from('event_collaborators')
         .select('id')
         .eq('event_id', eventId)
-        .eq('email', user.email)
+        .eq('email', (user as any).email)
         .not('accepted_at', 'is', null)
         .maybeSingle()
 

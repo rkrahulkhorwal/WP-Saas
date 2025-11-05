@@ -1,6 +1,14 @@
 import { NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { successResponse, errorResponse, requireAuth } from '@/lib/supabase/api-helpers';
+import { Database } from '@/lib/supabase/types';
+
+// Define the type for the user profile response with nested relationships
+type UserProfileResponse = Database['public']['Tables']['users']['Row'] & {
+  couple_profiles: Database['public']['Tables']['couple_profiles']['Row'][];
+  planner_profiles: Database['public']['Tables']['planner_profiles']['Row'][];
+  vendor_profiles: Database['public']['Tables']['vendor_profiles']['Row'][];
+};
 
 export async function GET(request: NextRequest) {
   try {
@@ -36,7 +44,10 @@ export async function GET(request: NextRequest) {
       return errorResponse('User not found', 404);
     }
 
-    return successResponse(userProfile);
+    // Type assertion to inform TypeScript of the actual return type
+    const typedUserProfile = userProfile as UserProfileResponse;
+
+    return successResponse(typedUserProfile);
   } catch (error) {
     console.error('Get user error:', error);
     return errorResponse('An error occurred while fetching user data', 500);
@@ -62,8 +73,8 @@ export async function PATCH(request: NextRequest) {
     if (phone !== undefined) updateData.phone = phone;
     if (avatar !== undefined) updateData.avatar = avatar;
 
-    const { data: updatedUser, error: updateError } = await supabase
-      .from('users')
+    const { data: updatedUser, error: updateError } = await (supabase
+      .from('users') as any)
       .update(updateData)
       .eq('id', user.id)
       .select('id, email, first_name, last_name, phone, role, avatar, is_verified')

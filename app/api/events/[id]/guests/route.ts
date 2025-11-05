@@ -58,7 +58,7 @@ export async function GET(
       guests,
       stats: {
         total: guests.length,
-        byStatus: stats.reduce((acc, stat) => {
+        byStatus: stats.reduce((acc: any, stat: any) => {
           acc[stat.rsvpStatus] = stat._count;
           return acc;
         }, {} as Record<string, number>),

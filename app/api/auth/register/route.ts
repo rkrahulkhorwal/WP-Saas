@@ -39,20 +39,20 @@ export async function POST(request: NextRequest) {
 
     // Update user profile with phone if provided
     if (validatedData.phone) {
-      await supabase
-        .from('users')
+      await (supabase
+        .from('users') as any)
         .update({ phone: validatedData.phone })
         .eq('id', authData.user.id);
     }
 
     // Create role-specific profile
     if (validatedData.role === 'COUPLE') {
-      await supabase
-        .from('couple_profiles')
+      await (supabase
+        .from('couple_profiles') as any)
         .insert({ user_id: authData.user.id });
     } else if (validatedData.role === 'PLANNER') {
-      await supabase
-        .from('planner_profiles')
+      await (supabase
+        .from('planner_profiles') as any)
         .insert({ user_id: authData.user.id });
     }
 

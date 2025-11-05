@@ -78,5 +78,6 @@ export async function hasRole(role: string | string[]) {
   if (!user) return false
 
   const roles = Array.isArray(role) ? role : [role]
-  return roles.includes(user.role)
+  const typedUser = user as Database['public']['Tables']['users']['Row']
+  return roles.includes(typedUser.role)
 }

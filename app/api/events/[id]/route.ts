@@ -37,6 +37,9 @@ export async function GET(
       return notFoundResponse('Event not found');
     }
 
+    // Type assertion for the event
+    const typedEvent = event as any;
+
     // Check if user has access to this event
     const hasAccess = await checkEventAccess(params.id, user!.id);
     if (!hasAccess) {
@@ -52,7 +55,7 @@ export async function GET(
     ]);
 
     return successResponse({
-      ...event,
+      ...typedEvent,
       _count: {
         guests: guestsCount.count || 0,
         tasks: tasksCount.count || 0,
@@ -92,22 +95,24 @@ export async function PATCH(
       return validationError;
     }
 
+    // Type assertion for validated data
+    const data = validatedData as any;
     const updateData: any = {};
 
-    if (validatedData!.name !== undefined) updateData.name = validatedData!.name;
-    if (validatedData!.type !== undefined) updateData.type = validatedData!.type;
-    if (validatedData!.date !== undefined) updateData.date = validatedData!.date;
-    if (validatedData!.time !== undefined) updateData.time = validatedData!.time;
-    if (validatedData!.venue !== undefined) updateData.venue = validatedData!.venue;
-    if (validatedData!.venueAddress !== undefined) updateData.venue_address = validatedData!.venueAddress;
-    if (validatedData!.budget !== undefined) updateData.budget = validatedData!.budget;
-    if (validatedData!.guestCount !== undefined) updateData.guest_count = validatedData!.guestCount;
-    if (validatedData!.description !== undefined) updateData.description = validatedData!.description;
-    if (validatedData!.partner1Name !== undefined) updateData.partner1_name = validatedData!.partner1Name;
-    if (validatedData!.partner2Name !== undefined) updateData.partner2_name = validatedData!.partner2Name;
+    if (data!.name !== undefined) updateData.name = data!.name;
+    if (data!.type !== undefined) updateData.type = data!.type;
+    if (data!.date !== undefined) updateData.date = data!.date;
+    if (data!.time !== undefined) updateData.time = data!.time;
+    if (data!.venue !== undefined) updateData.venue = data!.venue;
+    if (data!.venueAddress !== undefined) updateData.venue_address = data!.venueAddress;
+    if (data!.budget !== undefined) updateData.budget = data!.budget;
+    if (data!.guestCount !== undefined) updateData.guest_count = data!.guestCount;
+    if (data!.description !== undefined) updateData.description = data!.description;
+    if (data!.partner1Name !== undefined) updateData.partner1_name = data!.partner1Name;
+    if (data!.partner2Name !== undefined) updateData.partner2_name = data!.partner2Name;
 
-    const { data: updatedEvent, error } = await supabase
-      .from('events')
+    const { data: updatedEvent, error } = await (supabase
+      .from('events') as any)
       .update(updateData)
       .eq('id', params.id)
       .select()

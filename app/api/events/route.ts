@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
 
     // Get counts for each event
     const eventsWithCounts = await Promise.all(
-      (events || []).map(async (event) => {
+      (events || []).map(async (event: any) => {
         const [guestsCount, tasksCount, expensesCount] = await Promise.all([
           supabase.from('guests').select('id', { count: 'exact', head: true }).eq('event_id', event.id),
           supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('event_id', event.id),
@@ -67,10 +67,13 @@ export async function POST(request: NextRequest) {
       return validationError;
     }
 
+    // Type assertion for validated data
+    const data = validatedData as any;
+
     const supabase = createClient();
 
     // Generate a unique website slug if not provided
-    let websiteSlug = validatedData!.name
+    let websiteSlug = data!.name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '');
@@ -95,21 +98,21 @@ export async function POST(request: NextRequest) {
       counter++;
     }
 
-    const { data: event, error } = await supabase
-      .from('events')
+    const { data: event, error } = await (supabase
+      .from('events') as any)
       .insert({
         user_id: user!.id,
-        name: validatedData!.name,
-        type: validatedData!.type || 'Wedding',
-        date: validatedData!.date,
-        time: validatedData!.time,
-        venue: validatedData!.venue,
-        venue_address: validatedData!.venueAddress,
-        budget: validatedData!.budget,
-        guest_count: validatedData!.guestCount,
-        description: validatedData!.description,
-        partner1_name: validatedData!.partner1Name,
-        partner2_name: validatedData!.partner2Name,
+        name: data!.name,
+        type: data!.type || 'Wedding',
+        date: data!.date,
+        time: data!.time,
+        venue: data!.venue,
+        venue_address: data!.venueAddress,
+        budget: data!.budget,
+        guest_count: data!.guestCount,
+        description: data!.description,
+        partner1_name: data!.partner1Name,
+        partner2_name: data!.partner2Name,
         website_slug: websiteSlug,
       })
       .select()

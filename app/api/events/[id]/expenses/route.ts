@@ -35,7 +35,7 @@ export async function GET(
 
     // Calculate budget summary
     const summary = expenses.reduce(
-      (acc, expense) => {
+      (acc: any, expense: any) => {
         acc.totalEstimated += expense.estimatedCost;
         acc.totalActual += expense.actualCost || 0;
         acc.totalPaid += expense.paidAmount;

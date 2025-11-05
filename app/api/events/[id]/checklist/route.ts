@@ -34,7 +34,7 @@ export async function GET(
     });
 
     // Group by category
-    const grouped = items.reduce((acc, item) => {
+    const grouped = items.reduce((acc: any, item: any) => {
       const category = item.category || 'Uncategorized';
       if (!acc[category]) {
         acc[category] = [];
@@ -48,7 +48,7 @@ export async function GET(
       grouped,
       stats: {
         total: items.length,
-        completed: items.filter((i) => i.isCompleted).length,
+        completed: items.filter((i: any) => i.isCompleted).length,
       },
     });
   } catch (error) {
