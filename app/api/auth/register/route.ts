@@ -1,7 +1,6 @@
 import { NextRequest } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { hashPassword, generateAccessToken, generateRefreshToken } from '@/lib/auth';
-import { successResponse, errorResponse, validationErrorResponse } from '@/lib/api-response';
+import { createClient } from '@/lib/supabase/server';
+import { successResponse, errorResponse, validationErrorResponse } from '@/lib/supabase/api-helpers';
 import { registerSchema } from '@/lib/validators';
 import { ZodError } from 'zod';
 
@@ -12,69 +11,69 @@ export async function POST(request: NextRequest) {
     // Validate input
     const validatedData = registerSchema.parse(body);
 
-    // Check if user already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { email: validatedData.email },
+    const supabase = createClient();
+
+    // Sign up with Supabase Auth
+    const { data: authData, error: signUpError } = await supabase.auth.signUp({
+      email: validatedData.email,
+      password: validatedData.password,
+      options: {
+        data: {
+          first_name: validatedData.firstName,
+          last_name: validatedData.lastName,
+          role: validatedData.role,
+        },
+      },
     });
 
-    if (existingUser) {
-      return errorResponse('User with this email already exists', 409);
+    if (signUpError) {
+      if (signUpError.message.includes('already registered')) {
+        return errorResponse('User with this email already exists', 409);
+      }
+      return errorResponse(signUpError.message, 400);
     }
 
-    // Hash password
-    const hashedPassword = await hashPassword(validatedData.password);
+    if (!authData.user) {
+      return errorResponse('Failed to create user', 500);
+    }
 
-    // Create user
-    const user = await prisma.user.create({
-      data: {
-        email: validatedData.email,
-        password: hashedPassword,
-        firstName: validatedData.firstName,
-        lastName: validatedData.lastName,
-        phone: validatedData.phone,
-        role: validatedData.role,
-      },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        createdAt: true,
-      },
-    });
+    // Update user profile with phone if provided
+    if (validatedData.phone) {
+      await supabase
+        .from('users')
+        .update({ phone: validatedData.phone })
+        .eq('id', authData.user.id);
+    }
 
     // Create role-specific profile
     if (validatedData.role === 'COUPLE') {
-      await prisma.coupleProfile.create({
-        data: { userId: user.id },
-      });
+      await supabase
+        .from('couple_profiles')
+        .insert({ user_id: authData.user.id });
     } else if (validatedData.role === 'PLANNER') {
-      await prisma.plannerProfile.create({
-        data: { userId: user.id },
-      });
+      await supabase
+        .from('planner_profiles')
+        .insert({ user_id: authData.user.id });
     }
 
-    // Generate tokens
-    const fullUser = await prisma.user.findUnique({
-      where: { id: user.id },
-    });
-
-    const accessToken = generateAccessToken(fullUser!);
-    const refreshToken = generateRefreshToken(fullUser!);
+    // Get full user profile
+    const { data: userProfile } = await supabase
+      .from('users')
+      .select('id, email, first_name, last_name, phone, role, avatar, is_verified, created_at')
+      .eq('id', authData.user.id)
+      .single();
 
     return successResponse(
       {
-        user,
-        accessToken,
-        refreshToken,
+        user: userProfile,
+        session: authData.session,
       },
-      'User registered successfully',
       201
     );
   } catch (error) {
     if (error instanceof ZodError) {
-      return validationErrorResponse(error.errors);
+      const message = error.errors?.[0]?.message || 'Invalid request data';
+      return validationErrorResponse(message);
     }
 
     console.error('Registration error:', error);
