@@ -6,8 +6,8 @@ export async function GET(request: NextRequest) {
   try {
     const { user, error: authError } = await requireAuth();
 
-    if (authError) {
-      return authError;
+    if (authError || !user) {
+      return authError || errorResponse('Authentication required', 401);
     }
 
     const supabase = createClient();
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
         planner_profiles (*),
         vendor_profiles (*)
       `)
-      .eq('id', user!.id)
+      .eq('id', user.id)
       .single();
 
     if (!userProfile) {
@@ -47,8 +47,8 @@ export async function PATCH(request: NextRequest) {
   try {
     const { user, error: authError } = await requireAuth();
 
-    if (authError) {
-      return authError;
+    if (authError || !user) {
+      return authError || errorResponse('Authentication required', 401);
     }
 
     const body = await request.json();
@@ -65,7 +65,7 @@ export async function PATCH(request: NextRequest) {
     const { data: updatedUser, error: updateError } = await supabase
       .from('users')
       .update(updateData)
-      .eq('id', user!.id)
+      .eq('id', user.id)
       .select('id, email, first_name, last_name, phone, role, avatar, is_verified')
       .single();
 
